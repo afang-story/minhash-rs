@@ -458,6 +458,59 @@ fn save_lines_to_kill(lines_to_kill: DashMap<usize, DashSet<usize>>, path: &Path
 }
 
 
+fn build_duplicate_counter(band_storage: &BandStorage) -> DashMap<usize, DashSet<(usize, usize)>>
+{
+    let pbar = build_pbar(band_storage.len(), "Bands");
+    let duplicate_counter: DashMap<usize, DashSet<(usize, usize)>>  = DashMap::new();
+
+    for global_ref in band_storage.iter() {
+        global_ref.value().par_iter().for_each(|entry| {
+            let value = entry.value();
+            let (path_id, line_num) = &value[0];
+            duplicate_counter
+                .entry(path_id.as_usize())
+                .or_default()
+                .insert((line_num.as_usize(), value.len()));
+        });
+        pbar.inc(1);
+    }
+    duplicate_counter
+}
+
+
+fn save_duplicate_counter(path_lookup: &PathLookup, duplicate_counter: DashMap<usize, DashSet<(usize, usize)>>, path: &PathBuf) -> Result<(), Error>{
+    // Saves the duplicate_counter object to a path
+    //        let regular_set: HashSet<usize> = entry.1.iter().map(|r| *r).collect();
+    //        (entry.0, regular_set)
+
+    let regular_map : HashMap<PathBuf,HashSet<(usize, usize)>> = path_lookup.indices.par_iter()
+        .map(|entry| {
+            let input_filename = entry.key();
+            let path_id = entry.value();
+            // let regular_set: HashSet<(usize, usize)> = duplicate_counter.get(path_id).map(|r| *r).into_iter().collect();
+            // let mut regular_set: HashSet<(usize, usize)> = HashSet::new();
+            let file_set = duplicate_counter.get(path_id).map(|r| r.value().clone());
+            let file_set: DashSet<(usize, usize)> = if file_set.is_none() {
+                DashSet::new()
+            } else {
+                file_set.unwrap()
+            };
+            // let regular_set = HashSet::from_iter(file_set.iter());
+            let regular_set = file_set.iter().map(|r| *r).collect();
+            // file_set.par_iter().for_each(|entry| {
+            // let regular_set = HashSet::from_iter(file_set.iter());
+            //     regular_set.insert(entry.clone());
+            // });
+            (input_filename.clone(), regular_set)
+        })
+        .collect();
+
+    let bytes = serde_json::to_vec(&regular_map).unwrap();
+    write_mem_to_pathbuf(&bytes, &path).unwrap();
+    Ok(())
+}
+
+
 fn load_lines_to_kill(path: &PathBuf) -> Result<HashMap<usize, HashSet<usize>>, Error>{
     let bytes = read_pathbuf_to_mem(path).unwrap().into_inner().into_inner();
     let data: HashMap<usize, HashSet<usize>> = serde_json::from_slice(&bytes).unwrap();
@@ -587,8 +640,10 @@ fn minhash(input: &Vec<PathBuf>, output: &PathBuf, num_bands: u64, band_size: us
     println!("Collecting which documents to remove...");
     let start_line_to_kill = Instant::now();
     let lines_to_kill = build_lines_to_kill(&band_storage);
+    let duplicate_counter = build_duplicate_counter(&band_storage);
     println!("...collected which lines to kill in {:?} seconds", start_line_to_kill.elapsed().as_secs());
     save_lines_to_kill(lines_to_kill.clone(), &Path::join(&output, "lines_to_kill.gz")).unwrap();
+    save_duplicate_counter(&path_lookup, duplicate_counter.clone(), &Path::join(&output, "duplicate_counter.gz")).unwrap();
 
     // Phase 3: Chop all the lines
     println!("Removing duplicates from pool...");
