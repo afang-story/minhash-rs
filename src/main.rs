@@ -539,6 +539,34 @@ fn merge_lines_to_kill(all_lines_to_kill: Vec<HashMap<usize, HashSet<usize>>>) -
 }
 
 
+fn load_duplicate_counter(path: &PathBuf) -> Result<HashMap<usize, HashSet<(usize, usize)>>, Error>{
+    let bytes = read_pathbuf_to_mem(path).unwrap().into_inner().into_inner();
+    let data: HashMap<usize, HashSet<(usize, usize)>> = serde_json::from_slice(&bytes).unwrap();
+    Ok(data)
+}
+
+
+fn merge_duplicate_counter(all_duplicate_counter: Vec<HashMap<usize, HashSet<(usize, usize)>>>) -> Result<DashMap<usize, DashSet<(usize, usize)>>, Error> {
+    let duplicate_counter: DashMap<usize, DashSet<(usize, usize)>>  = DashMap::new();
+    //println!("ALTK {:?}", all_lines_to_kill);
+    let _ = all_duplicate_counter
+        .par_iter()
+        .for_each(|dash| {
+            dash
+            .par_iter()
+            .for_each(|(path_id, line_set)| {
+                let mut entry = duplicate_counter.entry(*path_id).or_default();
+                for line_num in line_set {
+                    entry.value_mut().insert(*line_num);
+                }
+            });
+        }
+    );
+    //println!("LTK {:?}", lines_to_kill);
+    Ok(duplicate_counter)
+}
+
+
 /*=================================================================
 =                         WRITE OUTPUTS                           =
 =================================================================*/
@@ -712,11 +740,14 @@ fn band_saver(path_lookup: &PathBuf, output: &PathBuf, band_group_id: usize, ban
     println!("Collecting which documents to remove...");
     let start_line_to_kill = Instant::now();
     let lines_to_kill = build_lines_to_kill(&band_storage);
+    let duplicate_counter = build_duplicate_counter(&band_storage);
     println!("...collected which lines to kill in {:?} seconds", start_line_to_kill.elapsed().as_secs());
 
     // Phase 3: Save outputs 
     let output_file = Path::join(output, format!("lines_to_kill_band{:08}.gz", band_group_id));
+    let output_dup_file = Path::join(output, format!("duplicate_counter_band{:08}.gz", band_group_id));
     save_lines_to_kill(lines_to_kill.clone(), &output_file).unwrap();
+    save_duplicate_counter(&path_lookup, duplicate_counter.clone(), &output_dup_file).unwrap();
 
     println!("-------------------------");
     println!("Completing part of MinHash run (band group {:?})", band_group_id);
