@@ -483,7 +483,7 @@ fn save_duplicate_counter(path_lookup: &PathLookup, duplicate_counter: DashMap<u
     //        let regular_set: HashSet<usize> = entry.1.iter().map(|r| *r).collect();
     //        (entry.0, regular_set)
 
-    let regular_map : HashMap<PathBuf,HashSet<(usize, usize)>> = path_lookup.indices.par_iter()
+    let regular_map : HashMap<usize,HashSet<(usize, usize)>> = path_lookup.indices.par_iter()
         .map(|entry| {
             let input_filename = entry.key();
             let path_id = entry.value();
@@ -501,7 +501,7 @@ fn save_duplicate_counter(path_lookup: &PathLookup, duplicate_counter: DashMap<u
             // let regular_set = HashSet::from_iter(file_set.iter());
             //     regular_set.insert(entry.clone());
             // });
-            (input_filename.clone(), regular_set)
+            (*path_id, regular_set)
         })
         .collect();
 
